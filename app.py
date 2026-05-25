@@ -3,6 +3,9 @@
 import os
 import logging
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import streamlit as st
 import openai
 
@@ -23,7 +26,11 @@ st.set_page_config(
 
 def init_openai_client() -> openai.OpenAI:
     """Create OpenAI client from secrets or env vars."""
-    api_key = st.secrets.get("openai", {}).get("api_key", "") or os.environ.get("OPENAI_API_KEY", "")
+    try:
+        api_key = st.secrets.get("openai", {}).get("api_key", "")
+    except Exception:
+        api_key = ""
+    api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
     if not api_key:
         st.error("⚠️ OpenAI API key is not configured. Add it to `.streamlit/secrets.toml` or set `OPENAI_API_KEY`.")
         st.stop()
@@ -68,10 +75,11 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**Example questions:**")
     st.markdown(
-        "- What is the total US population?\n"
-        "- Which state has the highest median household income?\n"
-        "- Compare population growth in Texas vs California\n"
-        "- What percentage of the population has a bachelor's degree?"
+        "- What is the total US population in 2025?\n"
+        "- Which state has the highest average household income?\n"
+        "- Compare population of Texas vs California from 2020 to 2025\n"
+        "- Which counties have the highest unemployment rate?\n"
+        "- How many housing units are in New York?"
     )
     st.markdown("---")
     if st.button("🗑️ Clear conversation"):

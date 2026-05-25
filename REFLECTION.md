@@ -21,8 +21,15 @@ Separating SQL generation from result interpretation makes the system:
 - **Testable** — each step can be tested in isolation
 - **Transparent** — users can see the SQL that produced their answer
 
-### Dynamic schema discovery
-Rather than hardcoding table/column names, the agent discovers the schema at startup. This makes it resilient to schema changes and means the prompts always reflect the actual data available.
+### Explicit schema in system prompt
+Rather than relying solely on dynamic discovery, I hardcoded the available column list (with descriptions and free/paid annotations) directly into the system prompt. This gives the LLM precise context about what data is queryable and prevents it from generating SQL against paid-only columns that return "On Suscription" text. Dynamic discovery supplements this as a fallback.
+
+### Model choice: GPT-4o
+I chose GPT-4o over cheaper alternatives (GPT-4o-mini, GPT-3.5-turbo) because:
+- **SQL generation quality** — Text-to-SQL is the critical path. A wrong query means a wrong answer. GPT-4o produces significantly more accurate SQL than smaller models, especially for aggregations, conditional logic, and multi-column queries.
+- **Single table, simple schema** — A cheaper model like GPT-4o-mini could likely handle this specific dataset (one table, straightforward columns). In production with more tables and complex joins, the quality gap would widen. For a demo evaluated by engineers, I prioritised correctness over cost optimisation.
+- **Cost is negligible at demo scale** — With 2 evaluators asking maybe 20 questions each, the total cost difference is ~$0.02 vs ~$0.10. Not worth risking incorrect SQL.
+- **With more time** I would benchmark GPT-4o-mini on a curated test set of 30+ questions. If accuracy is comparable (>95%), I'd switch to it for production cost savings (~10x cheaper).
 
 ### Streamlit
 I chose Streamlit over a custom React frontend to maximise time on AI engineering. Streamlit's built-in chat components, session state, and free cloud deployment made it the right trade-off for a 24-hour assignment.
@@ -56,7 +63,7 @@ I chose Streamlit over a custom React frontend to maximise time on AI engineerin
 ### Identified but not fully addressed:
 - **Ambiguous geographic levels** — "Population of Portland" could mean Portland, OR or Portland, ME. The LLM sometimes guesses rather than asking.
 - **Year ambiguity** — When the dataset has multiple years, the agent doesn't always clarify which year the user wants.
-- **Complex multi-table joins** — The LLM may generate incorrect joins for questions requiring multiple tables.
+- **Single-table limitation** — The free dataset has only one table. The architecture supports multi-table but the demo doesn't showcase it.
 - **Rate limiting** — No explicit rate limiting on the API or Snowflake connections.
 - **Token budget management** — Very long conversations may exceed the context window; current trimming is basic.
 

@@ -53,7 +53,7 @@ User Question
 
 2. **Two-step LLM pipeline** — Step 1: generate SQL. Step 2: interpret results in natural language. This separation makes the system more debuggable and testable.
 
-3. **Dynamic schema discovery** — On startup, the agent queries Snowflake for available tables and columns, then caches the schema. This makes the system resilient to schema changes.
+3. **Hardcoded schema + dynamic discovery fallback** — The system prompt contains the exact column list from the free-tier Census dataset, with clear annotations of which columns are free vs paid-only. Dynamic schema discovery supplements this at startup.
 
 4. **Error recovery with retry** — If a generated SQL query fails, the agent feeds the error back to the LLM for one self-correction attempt before surfacing a user-friendly message.
 
@@ -111,8 +111,8 @@ account = "..."
 user = "..."
 password = "..."
 warehouse = "COMPUTE_WH"
-database = "GLOBAL_GOVERNMENT"
-schema = "CYBERSYN"
+database = "US_CENSUS_DATA__DEMOGRAPHIC_INSIGHTS__FREE_DATASET"
+schema = "DATA_LISTINGS_SCH"
 
 [openai]
 api_key = "sk-..."
@@ -126,6 +126,6 @@ api_key = "sk-..."
 | `SNOWFLAKE_USER` | Username | — |
 | `SNOWFLAKE_PASSWORD` | Password | — |
 | `SNOWFLAKE_WAREHOUSE` | Compute warehouse | `COMPUTE_WH` |
-| `SNOWFLAKE_DATABASE` | Database name | `GLOBAL_GOVERNMENT` |
-| `SNOWFLAKE_SCHEMA` | Schema name | `CYBERSYN` |
+| `SNOWFLAKE_DATABASE` | Database name | `US_CENSUS_DATA__DEMOGRAPHIC_INSIGHTS__FREE_DATASET` |
+| `SNOWFLAKE_SCHEMA` | Schema name | `DATA_LISTINGS_SCH` |
 | `OPENAI_API_KEY` | OpenAI API key | — |
