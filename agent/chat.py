@@ -99,7 +99,7 @@ class CensusAgent:
         except Exception as e:
             logger.error("Failed to discover schema: %s", e)
             return AgentResponse(
-                answer="I'm having trouble connecting to the database right now. Please try again in a moment.",
+                answer="Snowflake is giving me the cold shoulder right now. ❄️ Try again in a moment!",
                 error=str(e),
             )
 
@@ -112,7 +112,7 @@ class CensusAgent:
         except Exception as e:
             logger.error("LLM call failed: %s", e)
             return AgentResponse(
-                answer="I'm having trouble processing your request right now. Please try again.",
+                answer="My brain temporarily short-circuited. 🧠⚡ Give it another shot!",
                 error=str(e),
             )
 
@@ -170,8 +170,8 @@ class CensusAgent:
             except ValueError as e:
                 # Read-only violation — don't retry
                 return AgentResponse(
-                    answer="I can only run read-only queries against the Census database. "
-                           "I can't modify any data.",
+                    answer="I'm a look-but-don't-touch kind of agent — read-only queries only! "
+                           "The Census data is safe from me.",
                     sql_query=sql,
                     error=str(e),
                 )
@@ -185,15 +185,15 @@ class CensusAgent:
                         continue
                 # Final failure
                 return AgentResponse(
-                    answer="I wasn't able to retrieve the data for that question. "
-                           f"The database returned an error: {e}\n\n"
-                           "Could you try rephrasing your question, or ask me what data is available?",
+                    answer="Hmm, that query didn't land. 🪨 "
+                           f"The database said: {e}\n\n"
+                           "Try rephrasing, or ask me what data I have access to!",
                     sql_query=sql,
                     error=str(e),
                 )
 
         # Should not reach here, but just in case
-        return AgentResponse(answer="Something went wrong. Please try again.")
+        return AgentResponse(answer="Something went sideways in an impossible way. 🤷 Try again?")
 
     def _interpret_results(
         self,
@@ -222,7 +222,7 @@ class CensusAgent:
         )
 
         messages = [
-            {"role": "system", "content": "You are a helpful data analyst. Present query results clearly."},
+            {"role": "system", "content": "You are the Census Whisperer — a sharp, slightly witty data analyst. Present results clearly with a touch of personality."},
             {"role": "user", "content": prompt},
         ]
         return self._call_llm(messages, temperature=0.2)

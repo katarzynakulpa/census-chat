@@ -16,8 +16,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 st.set_page_config(
-    page_title="US Census Chat Agent",
-    page_icon="📊",
+    page_title="Census Whisperer",
+    page_icon="🧮",
     layout="centered",
 )
 
@@ -62,27 +62,28 @@ if "ui_messages" not in st.session_state:
 
 # ── UI ──────────────────────────────────────────────────────────────────────
 
-st.title("📊 US Census Chat Agent")
-st.caption("Ask me anything about US population, demographics, income, housing, education, and more.")
+st.title("🧮 Census Whisperer")
+st.caption("I've read 33,000 ZIP codes so you don't have to. Ask me anything about US demographics.")
 
 # Sidebar — info & controls
 with st.sidebar:
     st.markdown("### About")
     st.markdown(
-        "This agent queries the **US Census Bureau** dataset hosted in Snowflake "
-        "to answer your questions using natural language."
+        "A natural-language agent that queries **33k+ ZIP codes** of US Census data "
+        "in Snowflake — so you can skip the SQL and go straight to the insights. "
+        "Built with GPT-4o, Snowflake, and an unreasonable fondness for demographics."
     )
     st.markdown("---")
-    st.markdown("**Example questions:**")
+    st.markdown("**Things you can ask me:**")
     st.markdown(
-        "- What is the total US population in 2025?\n"
-        "- Which state has the highest average household income?\n"
-        "- Compare population of Texas vs California from 2020 to 2025\n"
-        "- Which counties have the highest unemployment rate?\n"
-        "- How many housing units are in New York?"
+        "- What's the total US population in 2025?\n"
+        "- Which state has the richest households?\n"
+        "- Texas vs California — who's growing faster?\n"
+        "- Where in America is unemployment the worst?\n"
+        "- How many housing units does NYC actually have?"
     )
     st.markdown("---")
-    if st.button("🗑️ Clear conversation"):
+    if st.button("🧹 Start fresh"):
         st.session_state.chat_session = ChatSession()
         st.session_state.ui_messages = []
         st.rerun()
@@ -98,7 +99,7 @@ for msg in st.session_state.ui_messages:
 
 
 # Chat input
-if prompt := st.chat_input("Ask a question about US Census data…"):
+if prompt := st.chat_input("Ask me about population, income, housing… anything census-y"):
     # Show user message
     st.session_state.ui_messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -106,7 +107,7 @@ if prompt := st.chat_input("Ask a question about US Census data…"):
 
     # Process
     with st.chat_message("assistant"):
-        with st.spinner("Thinking…"):
+        with st.spinner("Crunching census numbers…"):
             try:
                 client = init_openai_client()
                 sf_conn = init_snowflake()
@@ -115,8 +116,8 @@ if prompt := st.chat_input("Ask a question about US Census data…"):
             except Exception as e:
                 logger.exception("Unhandled error in agent pipeline")
                 response_text = (
-                    "I'm sorry, something went wrong while processing your request. "
-                    "Please try again or rephrase your question."
+                    "Well, that wasn't supposed to happen. 🫠 "
+                    "Something broke on my end — try again or rephrase your question."
                 )
                 st.session_state.ui_messages.append({"role": "assistant", "content": response_text})
                 st.markdown(response_text)

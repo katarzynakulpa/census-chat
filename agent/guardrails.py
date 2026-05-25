@@ -32,7 +32,7 @@ MAX_INPUT_LENGTH = 2000
 def validate_input(user_message: str) -> tuple[bool, str]:
     """Validate user input. Returns (is_valid, rejection_reason)."""
     if not user_message or not user_message.strip():
-        return False, "Please enter a question about US Census data."
+        return False, "I'm all ears, but you haven't typed anything yet. Hit me with a census question!"
 
     if len(user_message) > MAX_INPUT_LENGTH:
         return False, (
@@ -44,8 +44,8 @@ def validate_input(user_message: str) -> tuple[bool, str]:
     for pattern in BLOCKED_PATTERNS:
         if re.search(pattern, user_message):
             return False, (
-                "I'm designed to answer questions about US Census data. "
-                "I can't process that type of request."
+                "Nice try! 😏 I'm laser-focused on US Census data though. "
+                "No jailbreaks, just ZIP codes."
             )
 
     return True, ""
@@ -81,10 +81,9 @@ def is_on_topic(user_message: str) -> tuple[bool, str]:
         return True, ""
 
     return False, (
-        "I'm specialized in answering questions about US Census and demographic data — "
-        "things like population, income, housing, education, and employment statistics. "
-        "Could you rephrase your question in terms of census data, or ask me something "
-        "about US demographics?"
+        "That's a bit outside my wheelhouse — I'm a one-trick pony, but it's a pretty good trick. "
+        "I know population, income, housing, employment, and all things US Census. "
+        "Try asking me something demographic-y!"
     )
 
 
