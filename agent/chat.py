@@ -121,6 +121,11 @@ class CensusAgent:
 
         if sql is None:
             # LLM decided to respond directly (clarification, off-topic decline, etc.)
+            if not llm_response or not llm_response.strip():
+                llm_response = (
+                    "I'm not sure how to answer that with the Census data I have access to. "
+                    "Could you rephrase, or ask about US population, income, housing, or employment?"
+                )
             session.add_message("assistant", llm_response)
             elapsed = int((time.time() - start_time) * 1000)
             return AgentResponse(answer=llm_response, execution_time_ms=elapsed)
@@ -163,8 +168,22 @@ class CensusAgent:
         for attempt in range(1 + MAX_RETRY_ATTEMPTS):
             try:
                 result = execute_query(self.conn, sql)
-                # Interpret results with LLM
-                answer = self._interpret_results(user_message, sql, result)
+                # Interpret results with LLM (wrap so a transient OpenAI error
+                # during interpretation doesn't bubble up unhandled).
+                try:
+                    answer = self._interpret_results(user_message, sql, result)
+                except Exception as interp_err:
+                    logger.error("Result interpretation failed: %s", interp_err)
+                    answer = (
+                        f"I got {result['row_count']} row(s) back from the database, "
+                        "but I couldn't put the summary together just now. "
+                        "Check the SQL preview below for the raw query, and try asking again."
+                    )
+                if not answer or not answer.strip():
+                    answer = (
+                        "The query ran successfully, but I couldn't generate a response. "
+                        "Try rephrasing your question."
+                    )
                 return AgentResponse(answer=answer, sql_query=sql)
 
             except ValueError as e:
