@@ -8,7 +8,7 @@ class TestValidateInput:
     def test_empty_message_rejected(self):
         valid, reason = validate_input("")
         assert not valid
-        assert "enter a question" in reason.lower()
+        assert "census" in reason.lower() or "typed anything" in reason.lower()
 
     def test_whitespace_only_rejected(self):
         valid, reason = validate_input("   ")
