@@ -108,7 +108,9 @@ class TestAgentProcessMessage:
 
         with patch("agent.chat.execute_query") as mock_exec:
             mock_exec.side_effect = ValueError("Only SELECT queries are allowed")
-            result = agent.process_message(session, "delete all data")
+            # Use a census-related phrasing so the soft topic filter lets it through
+            # to the SQL execution layer, where the read-only validator catches DROP.
+            result = agent.process_message(session, "delete all population data")
 
         assert "read-only" in result.answer.lower() or "look-but-don" in result.answer.lower()
 
