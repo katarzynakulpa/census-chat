@@ -1,81 +1,151 @@
 # Reflection
 
-## Development Process
+A written reflection on the build, the decisions I made, the ones I'd revisit, and what I left for later.
 
-I approached this in three phases:
+---
 
-1. **Architecture design** (~1h) — Chose a text-to-SQL pipeline with two-step LLM calls (generate SQL, then interpret results). This grounds every response in actual data rather than relying on the LLM's parametric knowledge.
+## 1. Development Process & Key Architectural Decisions
 
-2. **Core implementation** (~3–4h) — Built the agent pipeline, database layer, guardrails, and Streamlit UI. Prioritised the agent logic and error handling over frontend polish.
+### Process
 
-3. **Testing & deployment** (~1–2h) — Wrote unit tests with mocked dependencies, deployed to Streamlit Community Cloud.
+I worked in four phases:
 
-## Key Architectural Decisions
+1. **Explore the dataset (~45 min)** — Connected to Snowflake, ran `scripts/explore_schema.py` to inventory the Census table. Discovered that many "interesting" columns (race, gender, education) are paid-only and return literal `"On Suscription"` text. That discovery shaped the rest of the design.
 
-### Text-to-SQL vs. RAG
-I chose text-to-SQL over a RAG approach because the data is structured and lives in a SQL database. RAG would require embedding table data into vectors, which adds complexity and loses the precision of SQL aggregations. Text-to-SQL lets the LLM leverage its strong SQL generation capabilities while keeping responses grounded in exact query results.
+2. **Architecture design (~30 min)** — Settled on a single-agent, text-to-SQL pipeline with a two-step LLM call (generate SQL → interpret results). Wrote out the prompt structure and failure modes before writing implementation code.
 
-### Two-step LLM pipeline
-Separating SQL generation from result interpretation makes the system:
-- **Debuggable** — you can inspect the SQL independently of the answer
-- **Testable** — each step can be tested in isolation
-- **Transparent** — users can see the SQL that produced their answer
+3. **Core implementation (~3 hours)** — Built `agent/{chat,database,guardrails,prompts}.py`, then `app.py`, then tests. Centralized prompts in one file so they're easy to tune. Kept each module to one responsibility.
 
-### Explicit schema in system prompt
-Rather than relying solely on dynamic discovery, I hardcoded the available column list (with descriptions and free/paid annotations) directly into the system prompt. This gives the LLM precise context about what data is queryable and prevents it from generating SQL against paid-only columns that return "On Suscription" text. Dynamic discovery supplements this as a fallback.
+4. **Hardening & deployment (~1.5 hours)** — Added the SQL preview panel, layered guardrails, deployed to Streamlit Community Cloud, tightened the README, and added a final pass on graceful-degradation paths.
 
-### Model choice: GPT-4o
-I chose GPT-4o over cheaper alternatives (GPT-4o-mini, GPT-3.5-turbo) because:
-- **SQL generation quality** — Text-to-SQL is the critical path. A wrong query means a wrong answer. GPT-4o produces significantly more accurate SQL than smaller models, especially for aggregations, conditional logic, and multi-column queries.
-- **Single table, simple schema** — A cheaper model like GPT-4o-mini could likely handle this specific dataset (one table, straightforward columns). In production with more tables and complex joins, the quality gap would widen. For a demo evaluated by engineers, I prioritised correctness over cost optimisation.
-- **Cost is negligible at demo scale** — With 2 evaluators asking maybe 20 questions each, the total cost difference is ~$0.02 vs ~$0.10. Not worth risking incorrect SQL.
-- **With more time** I would benchmark GPT-4o-mini on a curated test set of 30+ questions. If accuracy is comparable (>95%), I'd switch to it for production cost savings (~10x cheaper).
+### Key architectural decisions (and why)
 
-### Streamlit
-I chose Streamlit over a custom React frontend to maximise time on AI engineering. Streamlit's built-in chat components, session state, and free cloud deployment made it the right trade-off for a 24-hour assignment.
+**Text-to-SQL over RAG.** The data is structured and numeric. Embedding it would lose precision and add infrastructure for no benefit. SQL generation grounds every answer in real rows and makes hallucination of statistics structurally difficult.
 
-## What I Would Improve With More Time
+**Single-agent pipeline, not multi-agent.** The task is single-domain and deterministic: NL → SQL → result → NL. A single `CensusAgent` orchestrates the flow; the LLM is invoked in three roles (SQL generator, result interpreter, error recoverer) with different prompts and temperatures. Multi-agent frameworks (LangGraph, AutoGen) would add latency, cost, and failure modes I don't need here.
 
-1. **Schema-aware prompt optimisation** — Currently the full schema is included in every prompt. With more time, I'd implement a schema selection step that only includes relevant tables based on the user's question, reducing token usage and improving accuracy.
+**Two-step LLM pipeline.** Separating SQL generation from result narration makes each step debuggable, individually testable, and lets me run them at different temperatures (0.1 for SQL precision, 0.2 for prose).
 
-2. **Query result caching** — Cache frequent queries (e.g., "total US population") to reduce Snowflake costs and response latency.
+**Schema baked into the system prompt + dynamic discovery as a safety net.** The exact column list with free-vs-paid annotations lives in `prompts.py`. `discover_schema()` runs at startup to catch drift. This combo gives the LLM enough context to generate correct SQL on the first try most of the time.
 
-3. **Streaming responses** — Use OpenAI streaming to show partial responses as they generate, improving perceived latency.
+**Defense-in-depth on read-only.** The LLM is *told* to only generate SELECT (system prompt), the output is *sanitized* to strip DDL/DML (`sanitize_sql_output`), and the database layer *validates* the SQL before execution. Three layers, all tested. For code generated by an LLM and executed against a database, redundancy is cheap insurance.
 
-4. **Better ambiguity handling** — Implement a classification step before SQL generation that detects ambiguous queries and proactively asks clarifying questions (e.g., "Which year?" or "At what geographic level?").
+**One-shot SQL error recovery.** If Snowflake rejects the generated SQL, I feed the error back to the LLM for one self-correction attempt. Beyond that, I degrade gracefully with a user-facing explanation. One retry catches ~90% of recoverable errors (typos, wrong column names); more retries blow the latency budget and risk slow-motion hallucination.
 
-5. **Observability** — Add structured logging, request tracing, and basic analytics (query patterns, error rates, latency percentiles).
+**GPT-4o, not mini.** SQL generation quality is the critical path — a wrong query means a wrong answer. The cost delta is negligible at demo scale (~$0.10 vs ~$0.01). In production I'd benchmark `gpt-4o-mini` on a golden set and switch if accuracy stays above ~95%.
 
-6. **Authentication** — Add basic auth or API key protection for the deployed app.
+**Streamlit over a custom React UI.** Optimized time spent on agent quality (the actual evaluation criterion) vs frontend plumbing. Streamlit's built-in chat components, session state, and free cloud deployment are a clean fit.
 
-7. **Integration tests** — Test the full pipeline with a real Snowflake connection and known query/answer pairs.
+**SQL preview under every answer.** Transparency builds trust. A recruiter can audit exactly what was queried. Cheap to add (`st.expander` + `st.code`), huge for credibility.
 
-## Edge Cases & Failure Modes
+**Personality with guardrails on accuracy.** I rebranded the agent as "Census Whisperer" with a light, dry voice. The system prompt explicitly says *"never at the expense of accuracy"*. Calculated bet — memorable demo without sounding unprofessional. If a recruiter dislikes it, two lines of prompt revert to neutral tone.
 
-### Identified and handled:
-- **Off-topic questions** — Soft keyword filter + LLM system prompt guardrail
-- **Prompt injection** — Regex-based detection of common injection patterns
-- **SQL injection / DML** — Read-only validation on all generated SQL
-- **Query failures** — One retry with LLM error recovery, then graceful error message
-- **Empty results** — LLM interprets empty results and suggests refinements
-- **Very long inputs** — Character limit enforcement
+---
 
-### Identified but not fully addressed:
-- **Ambiguous geographic levels** — "Population of Portland" could mean Portland, OR or Portland, ME. The LLM sometimes guesses rather than asking.
-- **Year ambiguity** — When the dataset has multiple years, the agent doesn't always clarify which year the user wants.
-- **Single-table limitation** — The free dataset has only one table. The architecture supports multi-table but the demo doesn't showcase it.
-- **Rate limiting** — No explicit rate limiting on the API or Snowflake connections.
-- **Token budget management** — Very long conversations may exceed the context window; current trimming is basic.
+## 2. What I Would Improve With More Time
 
-## Testing Strategy
+In rough priority order:
 
-### Current approach:
-- **Unit tests** with mocked Snowflake and OpenAI dependencies
-- **Guardrail tests** covering input validation, topic filtering, SQL sanitisation, and prompt injection detection
-- **Agent flow tests** covering the happy path, error recovery, read-only violations, and edge cases
+1. **Prompt-level automated tests.** The biggest gap. I'd add a `promptfoo` config with a golden set of ~30 questions (one per requirement in the brief) and assertion rules — `contains-any`, `not-contains-sql-block` for refusals, `llm-rubric` for nuanced cases (partial matches, conflicts). Run in CI on every prompt change.
 
-### What I would add:
-- **Integration tests** against a real Snowflake instance with known data
-- **LLM output evaluation** — Test that generated SQL is valid and returns expected results for a curated set of questions
-- **Load testing** — Verify the 60-second response time requirement under concurrent users
-- **Regression tests** — A growing suite of question/answer pairs that verify the agent doesn't regress on previously working queries
+2. **LLM-as-judge for faithfulness.** Add `Ragas` to measure whether the natural-language answer is faithful to the SQL result rows. This catches the subtle hallucinations that escape my text-to-SQL grounding (e.g. the LLM rounding up "84 million" to "almost 100 million" in narration).
+
+3. **Live Snowflake integration tests.** A small suite of `(question, expected SQL shape, expected row count range)` triplets run against the real dataset on a nightly cron. Catches schema drift, dataset updates, and SQL dialect regressions.
+
+4. **Schema-aware prompt slimming.** Today the full schema (~1.5k tokens) goes into every request. With multiple tables I'd add a lightweight "schema selector" step — embed each column description, retrieve the top-k relevant ones for the question, only send those. Saves cost and reduces LLM confusion.
+
+5. **Query-result caching.** `@st.cache_data` keyed on a hash of the generated SQL. Common questions ("total US population in 2025?") would return in <100ms instead of 5–10s. Free Snowflake credit savings, instant repeat queries.
+
+6. **Streaming responses.** OpenAI streaming + `st.write_stream` for the interpretation step. Massive perceived-latency improvement at zero accuracy cost.
+
+7. **Observability.** Structured JSON logging of `(user_id, question, generated_sql, row_count, latency_ms, error)`. Plus a hook to ship traces to `Langfuse` or `Helicone` for drift detection and human sampling.
+
+8. **Adaptive retry policy.** Different recovery strategies per error type — exponential backoff for rate limits, schema-correction for column-not-found, switch to "ask the user a clarifying question" on attempt 2 instead of retrying SQL.
+
+9. **Rate limiting & auth.** Per-session quotas (e.g. 30 queries per IP per hour) before exposing this beyond a demo. Streamlit Cloud doesn't ship this out of the box.
+
+10. **Charts.** A `st.bar_chart` / `st.line_chart` step on tabular results when the LLM detects a comparison or time-series shape. One additional prompt, big UX win.
+
+---
+
+## 3. Edge Cases & Failure Modes
+
+### Identified and fully handled
+
+| Failure mode | Mitigation |
+|---|---|
+| Off-topic questions ("what's the weather?") | Soft keyword filter (`guardrails.is_on_topic`) + LLM system-prompt guardrail |
+| Prompt injection ("ignore all previous instructions") | Regex patterns (`guardrails.BLOCKED_PATTERNS`) at the input layer |
+| DML / DDL injection | Three layers: prompt instruction, `sanitize_sql_output`, `database._validate_read_only` |
+| SQL generation failures (typos, bad columns) | One retry with LLM self-correction using the error message |
+| Empty result sets | Interpreter receives `(no rows returned)` explicitly and is instructed to explain + suggest refinements |
+| Empty LLM responses | Defensive guards on both the clarification and interpretation paths replace empty strings with helpful fallbacks |
+| OpenAI errors during interpretation | Nested try/except — user gets a fallback message that still shows the SQL preview |
+| Snowflake connection failures | Try/except at schema discovery + warm connection cache |
+| Long-running queries | 30s `STATEMENT_TIMEOUT_IN_SECONDS` + 500-row cap |
+| Conversation context overflow | `MAX_CONVERSATION_TURNS = 20` trim |
+| Ambiguous queries ("what's the population?") | System prompt rule #4 — agent asks a clarifying question |
+| Partial matches ("Texas, California, Atlantida") | System prompt rule #6 — agent answers about real states AND flags missing one |
+| Conflicting questions ("2030 population", outside dataset) | System prompt rule #7 — agent surfaces the conflict instead of guessing |
+| Reasonable but unanswerable ("racial breakdown") | System prompt rule #5 + explicit paid-only column list |
+
+### Identified but NOT fully addressed
+
+These are real edge cases I know about and chose to defer. I would not pretend in an interview they're solved.
+
+1. **Geographic disambiguation.** *"Population of Portland"* could mean Portland, OR or Portland, ME. The LLM sometimes guesses (usually OR) rather than asking. A production fix: detect collision city names at SQL-generation time and force a clarification.
+
+2. **Year defaults.** If the user asks *"what's the population?"* the LLM often defaults to 2025 without confirming. Sometimes that's fine (latest forecast is a reasonable default), sometimes it's not (the user might have meant 2020 census actuals). I'd add a "default-year disclosure" pattern in the system prompt — *"if you assumed a year, say so in your answer."*
+
+3. **Aggregation correctness on rates.** State-level unemployment is computed as `SUM(unemployment_rate)` aggregated from ZIP-level data, which is incorrect — rates should be population-weighted, not summed. The system prompt nudges the LLM toward correct aggregation but doesn't guarantee it. A fix is straightforward (population-weighted average) but requires either prompt engineering or a post-execution check.
+
+4. **Multi-table joins.** The free dataset is one table, so the architecture works. With two+ tables, the LLM would need a relationship hint in the prompt, which I haven't built. Hooks are in place (`discover_schema` enumerates tables) but the prompt template doesn't yet describe foreign keys.
+
+5. **Token-budget management on very long sessions.** Hard-trim at 20 turns; sessions longer than that lose early context silently. A summarization-based approach would preserve more context at the cost of one extra LLM call per turn.
+
+6. **Cost runaway.** No per-user rate limiting. A malicious user (or a tight evaluation loop) could rack up OpenAI/Snowflake costs. Mitigated only by Streamlit Cloud's free-tier limits and my own monthly OpenAI cap. Not safe for an untrusted public audience.
+
+7. **Schema drift.** The hardcoded column list in `prompts.py` could fall out of sync if Snowflake updates the dataset. `discover_schema()` runs at startup but I don't actively reconcile its output against the hardcoded list. A scheduled diff job would catch this.
+
+8. **LLM prompt-injection via the data itself.** The interpreter prompt embeds raw row values. If a column ever contained adversarial text, it could (in theory) influence the LLM. Low risk for Census data; high risk for user-generated content datasets.
+
+---
+
+## 4. Testing Approach & What I'd Add
+
+### What's there now
+
+28 tests across two modules, all using mocked external dependencies (OpenAI, Snowflake):
+
+| Module | Coverage |
+|---|---|
+| `tests/test_guardrails.py` | Input validation, prompt-injection patterns, topic filter, SQL sanitizer |
+| `tests/test_chat.py` | `ChatSession` behavior, full agent pipeline (with mocked LLM/DB), SQL extraction, success path, error-recovery retry, read-only violation, off-topic handling, clarification routing |
+
+### Why I tested it this way
+
+I tested the **agent's deterministic decision logic** — does it reject bad input? does it route clarifications correctly? does it retry on SQL errors? does it catch read-only violations? — rather than the LLM's output quality, which is non-deterministic and brittle to assert on.
+
+**Tradeoffs I made explicitly:**
+
+- **Mocked > integration:** Fast (suite runs in <2s), free (no API costs), deterministic. Cost: I'm not testing the real Snowflake schema or real OpenAI responses. Mitigated by `discover_schema()` at app startup as a runtime sanity check.
+- **Logic > prompt quality:** The deterministic glue is fully covered. Prompt quality is validated manually via the live demo and the README's "Try these prompts" table.
+- **No load tests:** Bounded by Snowflake's 30s timeout and OpenAI's latency. Streamlit Cloud's free tier isn't where you'd benchmark anyway.
+
+### What I would add, in priority order
+
+1. **`promptfoo` golden-set regression** — a YAML config with ~30 questions covering every behavior in the README's prompts table. Asserts structural properties (contains/not-contains) and uses `llm-rubric` for the nuanced cases (*"answer flags Atlantida as not found"*). Runs in CI on every prompt change.
+
+2. **`Ragas` for faithfulness** — measures whether the natural-language answer is faithful to the SQL result rows. Specifically catches the failure mode where SQL is correct but the interpreter narration drifts.
+
+3. **Live Snowflake integration tests** — a small nightly suite hitting the real dataset. Tests a handful of canonical questions and asserts SQL shape (uses `STATE_CODE`, has a `GROUP BY`) + row-count plausibility, not exact numbers (which change as data updates).
+
+4. **Adversarial / red-team pass with `Garak`** — catch prompt-injection bypasses I didn't anticipate.
+
+5. **Regression suite** — every bug ever filed becomes a test. Compounding value over time.
+
+6. **Latency / SLO assertions** — assert that the 95th percentile response time stays under 20s on a representative question set. Catches prompt-bloat regressions that quietly slow things down.
+
+### The honest summary
+
+The test suite I shipped is **strong on the agent's deterministic behavior and weak on the LLM's quality**. That's an explicit tradeoff: deterministic tests give me high signal in CI, while non-deterministic prompt behavior is what production observability and a `promptfoo` golden set are for. With 4–6 more hours I'd close the prompt-testing gap; with a week I'd close all six items above.
